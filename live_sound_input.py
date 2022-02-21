@@ -89,7 +89,7 @@ class LiveSoundInput(bpy.types.Node, AnimationNode):
     bl_idname = "an_LiveSoundInput"
     bl_label = "Get live sound"
 
-    device_id: EnumProperty(name="Audio device", default=deviceItems[0][0], description="The device used as audio source", items=deviceItems, update=lambda s,c:updateDevice(s,c,0))
+    device_id: EnumProperty(name="Device", default=deviceItems[0][0], description="The device used as audio source", items=deviceItems, update=lambda s,c:updateDevice(s,c,0))
     gain: FloatProperty(name="Gain", default=1.0, description="A gain applied to the sound", update=propertyChanged)
     frame_offset: IntProperty(name="Frame offset", default=0, description="An offset in the timestamp of the output Sound. This does not affect the float wavepoint output.", update=propertyChanged)
     mono: BoolProperty(name="Mono", default=True, description="Output a mono sound or all channels", update=AnimationNode.refresh)
@@ -98,12 +98,12 @@ class LiveSoundInput(bpy.types.Node, AnimationNode):
         self.newInput("Float", "Frame", "frame")
         updateDevice(self, None, 0) # initialize streams
         if self.mono:
-            self.newOutput("Sound", "Live sound channel", "sound")
-            self.newOutput("Float", "Wavepoints of channel", "sound_float")
+            self.newOutput("Sound", "Sound", "sound")
+            self.newOutput("Float", "Float", "sound_float")
         else:
             for i in range(devices[int(self.device_id)]["max_input_channels"]):
-                self.newOutput("Sound", "Live sound channel "+str(i), "sound_"+str(i))
-                self.newOutput("Float", "Wavepoints of channel "+str(i), "sound_float_"+str(i))
+                self.newOutput("Sound", "Sound ch"+str(i), "sound_"+str(i))
+                self.newOutput("Float", "Float ch"+str(i), "sound_float_"+str(i))
 
     def draw(self, layout):
         layout.prop(self, "device_id")
