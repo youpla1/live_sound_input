@@ -92,17 +92,24 @@ class LiveSoundInput(bpy.types.Node, AnimationNode):
     device_id: EnumProperty(name="Audio device", default=deviceItems[0][0], description="The device used as audio source", items=deviceItems, update=lambda s,c:updateDevice(s,c,0))
     gain: FloatProperty(name="Gain", default=1.0, description="A gain applied to the sound", update=propertyChanged)
     frame_offset: IntProperty(name="Frame offset", default=0, description="An offset in the timestamp of the output Sound. This does not affect the float wavepoint output.", update=propertyChanged)
+    mono: BoolProperty(name="Mono", default=True, description="Output a mono sound or all channels", update=AnimationNode.refresh)
 
     def create(self):
         self.newInput("Float", "Frame", "frame")
-        self.newOutput("Sound", "Live sound", "sound")
-        self.newOutput("Float", "Wavepoints", "sound_float")
         updateDevice(self, None, 0) # initialize streams
+        if self.mono:
+            self.newOutput("Sound", "Live sound channel", "sound")
+            self.newOutput("Float", "Wavepoints of channel", "sound_float")
+        else:
+            for i in range(devices[int(self.device_id)]["max_input_channels"]):
+                self.newOutput("Sound", "Live sound channel "+str(i), "sound_"+str(i))
+                self.newOutput("Float", "Wavepoints of channel "+str(i), "sound_float_"+str(i))
 
     def draw(self, layout):
         layout.prop(self, "device_id")
         layout.prop(self, "gain")
         #layout.prop(self, "frame_offset") #works well with this = 0, no need to expose to user for now
+        layout.prop(self, "mono")
 
     def execute(self, frame):
         devid = int(self.device_id)
@@ -112,35 +119,59 @@ class LiveSoundInput(bpy.types.Node, AnimationNode):
 
         global global_rec_buffer #the audio data is stored in this global dict by the stream callbacks
         if not devid in global_rec_buffer:
-            return Sound([]), 0
+            if self.mono:
+                return Sound([]), 0
+            else:
+                out = []
+                for ichan in range(chans):
+                    out.extend([Sound([]), 0])
+                return out
 
         #get previously recorded samples:
         buffers = global_rec_buffer[devid]
         if not buffers:
-            return Sound([]), 0
+            if self.mono:
+                return Sound([]), 0
+            else:
+                out = []
+                for ichan in range(chans):
+                    out.extend([Sound([]), 0])
+                return out
 
         rec = np.concatenate(buffers[::-1]) #reorder chronologically
-        mono = sum(rec.T)/chans*self.gain
-        nsamples = len(mono)
+        nsamples = rec.shape[0]
 
-        #build the Sound object:
-        data = SoundData(mono, sampleRate)
         fps = bpy.context.scene.render.fps / bpy.context.scene.render.fps_base #typically 24
         #align the time range such that the end is now + 'frame_offset' frames in the future
         now_plus_offset = (frame+self.frame_offset)/fps #unit=seconds
         start_s = now_plus_offset - nsamples/sampleRate
         end_s = now_plus_offset
-        try:
-            soundSequence = SoundSequence(data, start=start_s, end=end_s, volume=1, fps=fps, startOffset=0)
-        except TypeError: #handle old versions of the animation node addon
-            soundSequence = SoundSequence(data, start=start_s, end=end_s, volume=1, fps=fps)
-
-        sound = Sound([soundSequence])
-
-        #for those who want to play directly with the audio wavepoints:
         nfir = int(2*sampleRate/fps)
-        sound_float = sum(mono[-nfir:])/nfir #simple rectangular AAF with a 0 at the nyquist frequency
-        return sound, sound_float
+
+        out = []
+        outchans = chans
+        if self.mono:
+            outchans = 1
+        for ichan in range(outchans):
+            if self.mono:
+                raw_data = sum(rec.T)/chans*self.gain
+            else:
+                raw_data = rec.T[ichan,:]*self.gain
+
+            #build the Sound object:
+            data = SoundData(raw_data, sampleRate)
+            try:
+                soundSequence = SoundSequence(data, start=start_s, end=end_s, volume=1, fps=fps, startOffset=0)
+            except TypeError: #handle old versions of the animation node addon
+                soundSequence = SoundSequence(data, start=start_s, end=end_s, volume=1, fps=fps)
+
+            sound = Sound([soundSequence])
+
+            #for those who want to play directly with the audio wavepoints:
+            sound_float = sum(raw_data[-nfir:])/nfir #simple rectangular AAF with a 0 at the nyquist frequency
+
+            out.extend([sound, sound_float])
+        return out
 
     def delete(self):
         #properly close any open stream if needed:
